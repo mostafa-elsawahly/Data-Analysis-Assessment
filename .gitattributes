@@ -3,3 +3,5 @@ datasets/2026.zip filter=lfs diff=lfs merge=lfs -text
 datasets/2026/Accessions.7z filter=lfs diff=lfs merge=lfs -text
 datasets/2026/Separations.7z filter=lfs diff=lfs merge=lfs -text
 datasets/2026/Employment.7z filter=lfs diff=lfs merge=lfs -text
+datasets/2024/Employment/*.txt filter=lfs diff=lfs merge=lfs -text
+*.zip filter=lfs diff=lfs merge=lfs -text
