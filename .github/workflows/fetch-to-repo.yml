@@ -49,13 +49,17 @@ jobs:
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@users.noreply.github.com"
+          echo "--- tracked files with changes before commit ---"
+          git status --short | grep -v '^??' | head -20 || true
           for y in 2022 2023 2024 2025 2026; do
             [ -d "datasets/$y" ] || continue
             git add "datasets/$y"
             if ! git diff --cached --quiet; then
               git commit -m "Data update $y"
-              git pull --rebase origin main
-              git push origin main
+              git push origin main || {
+                git pull --rebase --autostash origin main
+                git push origin main
+              }
             fi
           done
 
