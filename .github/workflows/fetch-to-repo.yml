@@ -12,14 +12,16 @@ on:
           - employment
         default: accessions
       years:
-        description: "Years to fetch"
+        description: "Year to fetch"
         type: choice
         options:
-          - 2022-2026
-          - 2022-2023
-          - 2024-2025
+          - "2022"
+          - "2023"
+          - "2024"
+          - "2025"
           - "2026"
-        default: 2022-2026
+          - "2022-2026"
+        default: "2022"
 
 permissions:
   contents: write
@@ -64,34 +66,4 @@ jobs:
 
       - name: Commit and push, one year at a time
         run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@users.noreply.github.com"
-          for y in 2022 2023 2024 2025 2026; do
-            [ -d "datasets/$y" ] || continue
-            git add "datasets/$y"
-            if ! git diff --cached --quiet; then
-              git commit -m "Data update ${{ inputs.dataset }} $y"
-              git push origin main || {
-                git fetch origin main
-                git rebase --autostash origin/main
-                git push origin main
-              }
-            fi
-          done
-
-      - name: Sign in to Azure
-        uses: azure/login@v3
-        with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Upload to Azure Blob
-        run: |
-          az storage blob upload-batch \
-            --account-name "$AZURE_STORAGE_ACCOUNT" \
-            --destination "$AZURE_STORAGE_CONTAINER" \
-            --source datasets \
-            --auth-mode login \
-            --overwrite false \
-            --only-show-errors
+          git config user.name
