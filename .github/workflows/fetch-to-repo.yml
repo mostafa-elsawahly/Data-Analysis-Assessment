@@ -2,8 +2,15 @@ name: Fetch OPM data to repo and Azure
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "0 6 5 * *"
+    inputs:
+      dataset:
+        description: "Dataset to fetch"
+        type: choice
+        options:
+          - accessions
+          - separations
+          - employment
+        default: accessions
 
 permissions:
   contents: write
@@ -13,11 +20,6 @@ jobs:
   fetch:
     runs-on: ubuntu-latest
     timeout-minutes: 350
-    strategy:
-      fail-fast: false
-      max-parallel: 1
-      matrix:
-        dataset: [accessions, separations, employment]
     env:
       AZURE_STORAGE_ACCOUNT: ${{ vars.AZURE_STORAGE_ACCOUNT }}
       AZURE_STORAGE_CONTAINER: ${{ vars.AZURE_STORAGE_CONTAINER }}
@@ -34,8 +36,8 @@ jobs:
       - name: Install dependencies
         run: pip install pandas pyarrow requests
 
-      - name: Fetch and clean ${{ matrix.dataset }}
-        run: python -u fetch_to_repo.py ${{ matrix.dataset }}
+      - name: Fetch and clean ${{ inputs.dataset }}
+        run: python -u fetch_to_repo.py ${{ inputs.dataset }}
 
       - name: Check file sizes
         run: |
@@ -54,7 +56,7 @@ jobs:
             [ -d "datasets/$y" ] || continue
             git add "datasets/$y"
             if ! git diff --cached --quiet; then
-              git commit -m "Data update ${{ matrix.dataset }} $y"
+              git commit -m "Data update ${{ inputs.dataset }} $y"
               git push origin main || {
                 git fetch origin main
                 git rebase --autostash origin/main
