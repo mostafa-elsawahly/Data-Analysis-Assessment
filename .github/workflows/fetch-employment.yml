@@ -1,0 +1,64 @@
+name: Fetch Employment to Azure
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 6 * *"
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  employment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    env:
+      AZURE_STORAGE_ACCOUNT: ${{ vars.AZURE_STORAGE_ACCOUNT }}
+      AZURE_STORAGE_CONTAINER: ${{ vars.AZURE_STORAGE_CONTAINER }}
+      OUT_DIR: employment_out
+      EXISTING_FILE: existing.txt
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install pandas pyarrow requests
+
+      - name: Sign in to Azure
+        uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: List files already in Azure
+        run: |
+          az storage blob list \
+            --account-name "$AZURE_STORAGE_ACCOUNT" \
+            --container-name "$AZURE_STORAGE_CONTAINER" \
+            --auth-mode login \
+            --query "[].name" -o tsv > existing.txt
+
+      - name: Fetch and clean Employment
+        run: python -u fetch_to_repo.py employment
+
+      - name: Upload to Azure Blob
+        run: |
+          if [ -d employment_out ]; then
+            az storage blob upload-batch \
+              --account-name "$AZURE_STORAGE_ACCOUNT" \
+              --destination "$AZURE_STORAGE_CONTAINER" \
+              --source employment_out \
+              --auth-mode login \
+              --overwrite true \
+              --only-show-errors
+          else
+            echo "Nothing new to upload."
+          fi
