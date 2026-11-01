@@ -1,48 +1,77 @@
-import os, sys, time, requests, pandas as pd
-from pathlib import Path
-from clean_lib import clean
+name: Fetch OPM data to repo and Azure
 
-BASE = "https://data.opm.gov/api/v1/files"
-DATASETS = sys.argv[1:] or ["accessions", "separations"]
-OUT = Path(os.getenv("OUT_DIR", "datasets"))
-TMP = Path("tmp")
-TMP.mkdir(exist_ok=True)
+on:
+  workflow_dispatch:
+    inputs:
+      datasets:
+        description: "Datasets to fetch, separated by spaces"
+        default: "accessions separations employment"
+  schedule:
+    - cron: "0 6 5 * *"
 
-EXISTING = set()
-ef = os.getenv("EXISTING_FILE")
-if ef and Path(ef).exists():
-    EXISTING = set(Path(ef).read_text().split())
+permissions:
+  contents: write
+  id-token: write
 
-def get(url, **kw):
-    for i in range(5):
-        r = requests.get(url, timeout=180, **kw)
-        if r.status_code == 429:
-            time.sleep(15 * (i + 1)); continue
-        return r
-    r.raise_for_status()
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    env:
+      AZURE_STORAGE_ACCOUNT: ${{ vars.AZURE_STORAGE_ACCOUNT }}
+      AZURE_STORAGE_CONTAINER: ${{ vars.AZURE_STORAGE_CONTAINER }}
 
-for ds in DATASETS:
-    for year in range(2022, 2027):
-        r = get(f"{BASE}/{ds}", params={"current": "true", "year": year})
-        if r.status_code == 204 or not r.content:
-            print("No data:", ds, year); continue
-        for f in sorted(r.json(), key=lambda x: x["month"]):
-            rel = f"{year}/{ds.capitalize()}/{f['filename']}.parquet"
-            local = OUT / rel
-            if local.exists() or rel in EXISTING:
-                print("Exists, skipping:", rel); continue
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
 
-            raw = TMP / local.name
-            url = f"{BASE}/{ds}/{f['year']}/{f['month']}/{f['version']}/download"
-            with get(url, stream=True) as resp:
-                resp.raise_for_status()
-                with open(raw, "wb") as fh:
-                    for chunk in resp.iter_content(1 << 20):
-                        fh.write(chunk)
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
-            df = clean(pd.read_parquet(raw), f)
-            raw.unlink()
-            local.parent.mkdir(parents=True, exist_ok=True)
-            df.to_parquet(local, index=False, compression="zstd")
-            print("Done:", rel, len(df), "rows")
-            del df
+      - name: Install dependencies
+        run: pip install pandas pyarrow requests
+
+      - name: Fetch and clean data
+        run: python -u fetch_to_repo.py ${{ inputs.datasets || 'accessions separations employment' }}
+
+      - name: Check file sizes
+        run: |
+          big=$(find datasets -type f -size +95M)
+          if [ -n "$big" ]; then
+            echo "::error::Files larger than 95MB cannot be pushed to GitHub: $big"
+            exit 1
+          fi
+          du -sh datasets
+
+      - name: Commit and push, one year at a time
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          for y in 2022 2023 2024 2025 2026; do
+            [ -d "datasets/$y" ] || continue
+            git add "datasets/$y"
+            if ! git diff --cached --quiet; then
+              git commit -m "Data update $y"
+              git pull --rebase origin main
+              git push origin main
+            fi
+          done
+
+      - name: Sign in to Azure
+        uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Upload to Azure Blob
+        run: |
+          az storage blob upload-batch \
+            --account-name "$AZURE_STORAGE_ACCOUNT" \
+            --destination "$AZURE_STORAGE_CONTAINER" \
+            --source datasets \
+            --auth-mode login \
+            --overwrite false \
+            --only-show-errors
