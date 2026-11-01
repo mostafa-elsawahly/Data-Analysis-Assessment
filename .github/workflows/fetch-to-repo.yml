@@ -11,6 +11,15 @@ on:
           - separations
           - employment
         default: accessions
+      years:
+        description: "Years to fetch"
+        type: choice
+        options:
+          - 2022-2026
+          - 2022-2023
+          - 2024-2025
+          - "2026"
+        default: 2022-2026
 
 permissions:
   contents: write
@@ -36,8 +45,13 @@ jobs:
       - name: Install dependencies
         run: pip install pandas pyarrow requests
 
-      - name: Fetch and clean ${{ inputs.dataset }}
-        run: python -u fetch_to_repo.py ${{ inputs.dataset }}
+      - name: Fetch and clean ${{ inputs.dataset }} ${{ inputs.years }}
+        run: |
+          YEARS="${{ inputs.years }}"
+          export YEAR_FROM="${YEARS%-*}"
+          export YEAR_TO="${YEARS#*-}"
+          echo "Years: $YEAR_FROM to $YEAR_TO"
+          python -u fetch_to_repo.py ${{ inputs.dataset }}
 
       - name: Check file sizes
         run: |
