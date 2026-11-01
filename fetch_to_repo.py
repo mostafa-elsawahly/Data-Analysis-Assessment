@@ -1,12 +1,19 @@
-import sys, time, requests, pandas as pd
+import os, sys, time, requests, pandas as pd
 from pathlib import Path
 from clean_lib import clean
 
 BASE = "https://data.opm.gov/api/v1/files"
 DATASETS = sys.argv[1:] or ["accessions", "separations"]
-OUT = Path("datasets")
+YEAR_FROM = int(os.getenv("YEAR_FROM", "2022"))
+YEAR_TO = int(os.getenv("YEAR_TO", "2026"))
+OUT = Path(os.getenv("OUT_DIR", "datasets"))
 TMP = Path("tmp")
 TMP.mkdir(exist_ok=True)
+
+EXISTING = set()
+ef = os.getenv("EXISTING_FILE")
+if ef and Path(ef).exists():
+    EXISTING = set(Path(ef).read_text().split())
 
 def get(url, **kw):
     for i in range(5):
@@ -17,14 +24,15 @@ def get(url, **kw):
     r.raise_for_status()
 
 for ds in DATASETS:
-    for year in range(2022, 2027):
+    for year in range(YEAR_FROM, YEAR_TO + 1):
         r = get(f"{BASE}/{ds}", params={"current": "true", "year": year})
         if r.status_code == 204 or not r.content:
             print("No data:", ds, year); continue
         for f in sorted(r.json(), key=lambda x: x["month"]):
-            local = OUT / str(year) / ds.capitalize() / f"{f['filename']}.parquet"
-            if local.exists():
-                print("Exists, skipping:", local); continue
+            rel = f"{year}/{ds.capitalize()}/{f['filename']}.parquet"
+            local = OUT / rel
+            if local.exists() or rel in EXISTING:
+                print("Exists, skipping:", rel); continue
 
             raw = TMP / local.name
             url = f"{BASE}/{ds}/{f['year']}/{f['month']}/{f['version']}/download"
@@ -38,4 +46,5 @@ for ds in DATASETS:
             raw.unlink()
             local.parent.mkdir(parents=True, exist_ok=True)
             df.to_parquet(local, index=False, compression="zstd")
-            print("Done:", local, len(df), "rows")
+            print("Done:", rel, len(df), "rows")
+            del df
