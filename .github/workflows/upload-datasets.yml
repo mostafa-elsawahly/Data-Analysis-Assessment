@@ -1,0 +1,87 @@
+name: Upload datasets to Azure Blob
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'datasets/**'
+  workflow_dispatch:
+    inputs:
+      full_sync:
+        description: 'Upload every file under datasets for the initial load'
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    env:
+      AZURE_STORAGE_ACCOUNT: ${{ vars.AZURE_STORAGE_ACCOUNT }}
+      AZURE_STORAGE_CONTAINER: ${{ vars.AZURE_STORAGE_CONTAINER }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          lfs: true
+
+      - name: Sign in to Azure
+        uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Upload dataset files
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.sha }}
+          FULL_SYNC: ${{ inputs.full_sync }}
+        run: |
+          set -eo pipefail
+
+          if [[ ! -d datasets ]]; then
+            echo "::error::The datasets folder was not found."
+            exit 1
+          fi
+
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            if [[ "$FULL_SYNC" != "true" ]]; then
+              echo "::error::Select full_sync to upload all existing dataset files."
+              exit 1
+            fi
+            mapfile -d '' -t files < <(find datasets -type f -print0)
+          else
+            mapfile -d '' -t files < <(
+              git diff --name-only -z --diff-filter=ACMRT \
+                "$BEFORE_SHA" "$AFTER_SHA" -- datasets/
+            )
+          fi
+
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo "No added or modified dataset files to upload."
+            exit 0
+          fi
+
+          for file in "${files[@]}"; do
+            [[ -f "$file" ]] || continue
+            blob_name="${file#datasets/}"
+            echo "Uploading: $blob_name"
+            az storage blob upload \
+              --account-name "$AZURE_STORAGE_ACCOUNT" \
+              --container-name "$AZURE_STORAGE_CONTAINER" \
+              --file "$file" \
+              --name "$blob_name" \
+              --auth-mode login \
+              --overwrite true \
+              --only-show-errors
+          done

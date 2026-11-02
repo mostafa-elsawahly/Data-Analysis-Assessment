@@ -1,0 +1,110 @@
+name: Fetch OPM data to repo and Azure
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset:
+        description: "Dataset to fetch"
+        type: choice
+        options:
+          - accessions
+          - separations
+          - employment
+        default: accessions
+      years:
+        description: "Year to fetch"
+        type: choice
+        options:
+          - "2022"
+          - "2023"
+          - "2024"
+          - "2025"
+          - "2026"
+          - "2022-2026"
+        default: "2022"
+      months:
+        description: "Months to fetch"
+        type: choice
+        options:
+          - "1-12"
+          - "1-6"
+          - "7-12"
+        default: "1-12"
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    env:
+      AZURE_STORAGE_ACCOUNT: ${{ vars.AZURE_STORAGE_ACCOUNT }}
+      AZURE_STORAGE_CONTAINER: ${{ vars.AZURE_STORAGE_CONTAINER }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install pandas pyarrow requests
+
+      - name: Fetch and clean ${{ inputs.dataset }} ${{ inputs.years }} months ${{ inputs.months }}
+        run: |
+          YEARS="${{ inputs.years }}"
+          MONTHS="${{ inputs.months }}"
+          export YEAR_FROM="${YEARS%-*}"
+          export YEAR_TO="${YEARS#*-}"
+          export MONTH_FROM="${MONTHS%-*}"
+          export MONTH_TO="${MONTHS#*-}"
+          echo "Years: $YEAR_FROM to $YEAR_TO | Months: $MONTH_FROM to $MONTH_TO"
+          python -u fetch_to_repo.py ${{ inputs.dataset }}
+
+      - name: Check file sizes
+        run: |
+          big=$(find datasets -type f -size +95M)
+          if [ -n "$big" ]; then
+            echo "::error::Files larger than 95MB cannot be pushed to GitHub: $big"
+            exit 1
+          fi
+          du -sh datasets
+
+      - name: Commit and push, one year at a time
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          for y in 2022 2023 2024 2025 2026; do
+            [ -d "datasets/$y" ] || continue
+            git add "datasets/$y"
+            if ! git diff --cached --quiet; then
+              git commit -m "Data update ${{ inputs.dataset }} $y months ${{ inputs.months }}"
+              git push origin main || {
+                git fetch origin main
+                git rebase --autostash origin/main
+                git push origin main
+              }
+            fi
+          done
+
+      - name: Sign in to Azure
+        uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Upload to Azure Blob
+        run: |
+          az storage blob upload-batch \
+            --account-name "$AZURE_STORAGE_ACCOUNT" \
+            --destination "$AZURE_STORAGE_CONTAINER" \
+            --source datasets \
+            --auth-mode login \
+            --overwrite false \
+            --only-show-errors
