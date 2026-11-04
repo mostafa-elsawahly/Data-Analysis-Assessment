@@ -12,11 +12,6 @@ OUT = Path(os.getenv("OUT_DIR", "datasets"))
 TMP = Path("tmp")
 TMP.mkdir(exist_ok=True)
 
-EXISTING = set()
-ef = os.getenv("EXISTING_FILE")
-if ef and Path(ef).exists():
-    EXISTING = set(Path(ef).read_text().split())
-
 def get(url, **kw):
     for i in range(5):
         r = requests.get(url, timeout=180, **kw)
@@ -35,7 +30,7 @@ for ds in DATASETS:
                 continue
             rel = f"{year}/{ds.capitalize()}/{f['filename']}.parquet"
             local = OUT / rel
-            if local.exists() or rel in EXISTING:
+            if local.exists():
                 print("Exists, skipping:", rel); continue
 
             raw = TMP / local.name
