@@ -1,4 +1,4 @@
-name: Fetch OPM data to repo and Azure
+name: Fetch OPM data to repo
 
 on:
   workflow_dispatch:
@@ -33,15 +33,11 @@ on:
 
 permissions:
   contents: write
-  id-token: write
 
 jobs:
   fetch:
     runs-on: ubuntu-latest
     timeout-minutes: 350
-    env:
-      AZURE_STORAGE_ACCOUNT: ${{ vars.AZURE_STORAGE_ACCOUNT }}
-      AZURE_STORAGE_CONTAINER: ${{ vars.AZURE_STORAGE_CONTAINER }}
 
     steps:
       - name: Check out repository
@@ -64,7 +60,7 @@ jobs:
           export MONTH_FROM="${MONTHS%-*}"
           export MONTH_TO="${MONTHS#*-}"
           echo "Years: $YEAR_FROM to $YEAR_TO | Months: $MONTH_FROM to $MONTH_TO"
-          python -u fetch_to_repo.py ${{ inputs.dataset }}
+          python -u scripts/ingestion/fetch_to_repo.py ${{ inputs.dataset }}
 
       - name: Check file sizes
         run: |
@@ -91,20 +87,3 @@ jobs:
               }
             fi
           done
-
-      - name: Sign in to Azure
-        uses: azure/login@v3
-        with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Upload to Azure Blob
-        run: |
-          az storage blob upload-batch \
-            --account-name "$AZURE_STORAGE_ACCOUNT" \
-            --destination "$AZURE_STORAGE_CONTAINER" \
-            --source datasets \
-            --auth-mode login \
-            --overwrite false \
-            --only-show-errors
